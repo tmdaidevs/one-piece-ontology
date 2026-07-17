@@ -17,14 +17,12 @@ const entityList = document.getElementById("entity-list");
 const entityDetails = document.getElementById("entity-details");
 const relationLinks = document.getElementById("relation-links");
 const relationGraph = document.getElementById("relation-graph");
-const graphNodes = document.getElementById("graph-nodes");
 const timelineBars = document.getElementById("timeline-bars");
 const thresholdInput = document.getElementById("transition-threshold");
 const thresholdValue = document.getElementById("threshold-value");
 const alertsAssigned = document.getElementById("alerts-assigned");
 const alertsOpen = document.getElementById("alerts-open");
 const entityItemTemplate = document.getElementById("entity-item-template");
-const graphNodeTemplate = document.getElementById("graph-node-template");
 
 bindEvents();
 render();
@@ -189,7 +187,6 @@ function renderSelection() {
     relationLinks.innerHTML = "No entity selected.";
     relationLinks.classList.add("muted");
     relationGraph.innerHTML = "";
-    graphNodes.innerHTML = "";
     return;
   }
 
@@ -250,79 +247,77 @@ function renderRelationLinks(entity) {
 function renderRelationGraph(entity) {
   const edges = buildEdges(entity);
   const ranked = rankEdges(edges).filter((edge) => edge.weight >= state.threshold / 100);
-  const pruned = ranked.slice(0, 14);
+  const pruned = ranked.slice(0, 10);
   const width = relationGraph.clientWidth || 1000;
   const height = relationGraph.clientHeight || 510;
 
   relationGraph.setAttribute("viewBox", `0 0 ${width} ${height}`);
   relationGraph.innerHTML = "";
-  graphNodes.innerHTML = "";
 
-  const selectedNode = { id: entity.id, x: width * 0.34, y: height * 0.45, kind: "selected", entity };
+  if (pruned.length === 0) {
+    appendSvgText(relationGraph, width / 2, height / 2, "No transitions above current threshold", "#657489", 16);
+    return;
+  }
+
+  const boxWidth = 200;
+  const boxHeight = 64;
+  const marginX = 46;
+  const marginY = 42;
+
+  const selectedNode = {
+    id: entity.id,
+    x: width * 0.5,
+    y: height * 0.5,
+    kind: "selected",
+    entity
+  };
 
   const outgoing = pruned.filter((edge) => edge.direction === "outgoing");
   const incoming = pruned.filter((edge) => edge.direction === "incoming");
 
-  const outgoingNodes = outgoing.map((edge, index) => ({
-    id: edge.other.id,
-    x: width * (0.62 + (index % 3) * 0.15),
-    y: height * (0.18 + (Math.floor(index / 3) * 0.2)),
-    kind: "outgoing",
-    entity: edge.other
-  }));
-
-  const incomingNodes = incoming.map((edge, index) => ({
-    id: edge.other.id,
-    x: width * 0.12,
-    y: height * (0.22 + index * 0.2),
-    kind: "incoming",
-    entity: edge.other
-  }));
-
-  const dedupedNodes = dedupeNodes([selectedNode, ...incomingNodes, ...outgoingNodes]);
-  const nodeById = new Map(dedupedNodes.map((node) => [node.id, node]));
+  const outgoingNodes = distributeFlowNodes(outgoing, "outgoing", width, height, marginX, marginY, boxWidth, boxHeight);
+  const incomingNodes = distributeFlowNodes(incoming, "incoming", width, height, marginX, marginY, boxWidth, boxHeight);
+  const nodes = dedupeNodes([selectedNode, ...incomingNodes, ...outgoingNodes]);
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
 
   pruned.forEach((edge) => {
     const sourceNode = edge.direction === "outgoing" ? nodeById.get(entity.id) : nodeById.get(edge.other.id);
     const targetNode = edge.direction === "outgoing" ? nodeById.get(edge.other.id) : nodeById.get(entity.id);
-    if (!sourceNode || !targetNode) {
-      return;
+    if (sourceNode && targetNode) {
+      appendCurvedEdge(relationGraph, sourceNode, targetNode, edge);
     }
-
-    appendCurvedEdge(relationGraph, sourceNode, targetNode, edge);
   });
 
-  dedupedNodes.forEach((node) => appendGraphNode(node));
+  nodes.forEach((node) => appendRectNode(relationGraph, node, boxWidth, boxHeight));
 }
 
-function appendGraphNode(node) {
-  const fragment = graphNodeTemplate.content.cloneNode(true);
-  const button = fragment.querySelector(".graph-node");
-  const title = fragment.querySelector(".graph-node-title");
-  const meta = fragment.querySelector(".graph-node-meta");
+function distributeFlowNodes(edges, kind, width, height, marginX, marginY, boxWidth, boxHeight) {
+  return edges.map((edge, index) => {
+    const rows = Math.ceil(edges.length / 2);
+    const row = index % rows;
+    const col = Math.floor(index / rows);
+    const laneX = kind === "outgoing"
+      ? width * (0.7 + col * 0.2)
+      : width * (0.18 - col * 0.14);
+    const laneY = marginY + row * ((height - marginY * 2) / Math.max(1, rows - 1));
 
-  button.classList.add(node.kind);
-  button.style.left = `${node.x}px`;
-  button.style.top = `${node.y}px`;
-  title.textContent = node.entity.name;
-  meta.textContent = `${node.entity.category} | ${node.entity.relations?.length ?? 0} transitions`;
-  button.setAttribute("aria-label", `${node.entity.name} (${node.entity.category})`);
-  button.addEventListener("click", () => {
-    state.selectedId = node.entity.id;
-    renderEntityList();
-    renderSelection();
+    return {
+      id: edge.other.id,
+      x: clamp(laneX, marginX + boxWidth / 2, width - marginX - boxWidth / 2),
+      y: clamp(laneY, marginY + boxHeight / 2, height - marginY - boxHeight / 2),
+      kind,
+      entity: edge.other
+    };
   });
-
-  graphNodes.appendChild(fragment);
 }
 
 function appendCurvedEdge(svg, sourceNode, targetNode, edge) {
-  const sourceX = sourceNode.x + (sourceNode.kind === "incoming" ? 80 : 110);
+  const sourceX = sourceNode.x;
   const sourceY = sourceNode.y;
-  const targetX = targetNode.x - (targetNode.kind === "incoming" ? 120 : 80);
+  const targetX = targetNode.x;
   const targetY = targetNode.y;
   const controlX = (sourceX + targetX) / 2;
-  const controlY = sourceY < targetY ? sourceY - 35 : sourceY + 35;
+  const controlY = sourceY < targetY ? sourceY + 40 : sourceY - 40;
   const color = edge.direction === "outgoing" ? "#0e7a43" : "#7a8797";
 
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -342,6 +337,75 @@ function appendCurvedEdge(svg, sourceNode, targetNode, edge) {
   label.setAttribute("font-size", "11");
   label.textContent = `${Math.round(edge.weight * 100)}%`;
   svg.appendChild(label);
+}
+
+function appendRectNode(svg, node, width, height) {
+  const nodeGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  nodeGroup.style.cursor = "pointer";
+  nodeGroup.setAttribute("role", "button");
+  nodeGroup.setAttribute("tabindex", "0");
+  nodeGroup.setAttribute("aria-label", `${node.entity.name} (${node.entity.category})`);
+
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect.setAttribute("x", String(node.x - width / 2));
+  rect.setAttribute("y", String(node.y - height / 2));
+  rect.setAttribute("width", String(width));
+  rect.setAttribute("height", String(height));
+  rect.setAttribute("rx", "8");
+  rect.setAttribute("fill", "#ffffff");
+  rect.setAttribute("stroke", "#b8c1cc");
+  rect.setAttribute("stroke-width", "1.5");
+  nodeGroup.appendChild(rect);
+
+  const accent = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  accent.setAttribute("x", String(node.x - width / 2));
+  accent.setAttribute("y", String(node.y - height / 2));
+  accent.setAttribute("width", String(width));
+  accent.setAttribute("height", "8");
+  accent.setAttribute("rx", "8");
+  accent.setAttribute("fill", node.kind === "selected" ? "#b22e2e" : node.kind === "outgoing" ? "#0e7a43" : "#576981");
+  nodeGroup.appendChild(accent);
+
+  appendSvgText(nodeGroup, node.x - width / 2 + 10, node.y - 10, shorten(node.entity.name, 24), "#182131", 12, "start", true);
+  appendSvgText(
+    nodeGroup,
+    node.x - width / 2 + 10,
+    node.y + 10,
+    `${node.entity.category} | ${(node.entity.relations ?? []).length} transitions`,
+    "#4d5d72",
+    11,
+    "start"
+  );
+
+  nodeGroup.addEventListener("click", () => {
+    state.selectedId = node.entity.id;
+    renderEntityList();
+    renderSelection();
+  });
+  nodeGroup.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      state.selectedId = node.entity.id;
+      renderEntityList();
+      renderSelection();
+    }
+  });
+
+  svg.appendChild(nodeGroup);
+}
+
+function appendSvgText(target, x, y, textContent, color, size, anchor = "middle", strong = false) {
+  const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  text.setAttribute("x", String(x));
+  text.setAttribute("y", String(y));
+  text.setAttribute("text-anchor", anchor);
+  text.setAttribute("fill", color);
+  text.setAttribute("font-size", String(size));
+  if (strong) {
+    text.setAttribute("font-weight", "700");
+  }
+  text.textContent = textContent;
+  target.appendChild(text);
 }
 
 function buildEdges(entity) {
@@ -381,6 +445,14 @@ function dedupeNodes(nodes) {
   nodes.forEach((node) => {
     if (!byId.has(node.id)) {
       byId.set(node.id, node);
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function shorten(value, max) {
+      return value.length <= max ? value : `${value.slice(0, max - 1)}...`;
     }
   });
   return Array.from(byId.values());

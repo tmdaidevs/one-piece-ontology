@@ -332,55 +332,7 @@ body {
   height: 510px;
   display: block;
   background: #fbfcfe;
-}
-
-.graph-nodes {
-  position: absolute;
-  inset: 0;
-}
-
-.graph-node {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  border: 1px solid var(--line-strong);
-  background: #fff;
-  width: min(220px, 22vw);
-  min-height: 62px;
-  padding: 0.45rem 0.55rem;
-  text-align: left;
-  cursor: pointer;
-  border-top: 8px solid #909eb0;
-  box-shadow: var(--shadow);
-}
-
-.graph-node:hover {
-  border-color: #8fa5c4;
-}
-
-.graph-node.selected {
-  border-color: var(--danger);
-  border-top-color: var(--danger);
-}
-
-.graph-node.outgoing {
-  border-top-color: var(--green);
-}
-
-.graph-node.incoming {
-  border-top-color: #576981;
-}
-
-.graph-node-title {
-  display: block;
-  font-weight: 700;
-  font-size: 0.82rem;
-  margin-bottom: 0.2rem;
-}
-
-.graph-node-meta {
-  display: block;
-  color: #47576d;
-  font-size: 0.74rem;
+  border-top: 1px solid var(--line);
 }
 
 .inspector {
