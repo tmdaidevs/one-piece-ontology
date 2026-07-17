@@ -4,7 +4,7 @@ const state = {
   search: "",
   activeCategories: new Set(CATEGORIES),
   selectedId: ontologyEntities[0]?.id ?? null,
-  threshold: 35
+  maxLinkedNodes: 10
 };
 
 const entityById = new Map(ontologyEntities.map((entity) => [entity.id, entity]));
@@ -30,14 +30,15 @@ render();
 function bindEvents() {
   searchInput.addEventListener("input", (event) => {
     state.search = event.target.value.trim().toLowerCase();
+    renderCategoryFilters();
     renderEntityList();
     renderSelection();
   });
 
   thresholdInput.addEventListener("input", (event) => {
-    state.threshold = Number(event.target.value);
-    thresholdValue.textContent = String(state.threshold);
-    renderSelection();
+    state.maxLinkedNodes = Number(event.target.value);
+    thresholdValue.textContent = String(state.maxLinkedNodes);
+    renderRelationGraph(entityById.get(state.selectedId));
   });
 }
 
@@ -52,8 +53,8 @@ function render() {
 function renderHeaderSummary() {
   const totalEntities = ontologyEntities.length;
   const totalRelations = ontologyEntities.reduce((sum, entity) => sum + (entity.relations?.length ?? 0), 0);
-  alertsAssigned.textContent = String(totalEntities * 7 + 14);
-  alertsOpen.textContent = String(totalRelations + totalEntities);
+  alertsAssigned.textContent = String(totalEntities);
+  alertsOpen.textContent = String(totalRelations);
 }
 
 function renderTimelineBars() {
@@ -73,7 +74,6 @@ function buildTimelineSeries() {
     const bucket = index % buckets.length;
     buckets[bucket] += (entity.relations?.length ?? 1) + entity.tags.length;
   });
-
   const max = Math.max(...buckets, 1);
   return buckets.map((value) => (value / max) * 100);
 }
@@ -121,14 +121,7 @@ function getSearchMatchedEntities() {
       return true;
     }
 
-    const haystack = [
-      entity.name,
-      entity.summary,
-      ...entity.tags,
-      ...Object.values(entity.attributes)
-    ]
-      .join(" ")
-      .toLowerCase();
+    const haystack = [entity.name, entity.summary, ...entity.tags, ...Object.values(entity.attributes)].join(" ").toLowerCase();
     return haystack.includes(state.search);
   });
 }
@@ -229,8 +222,8 @@ function renderRelationLinks(entity) {
     const li = document.createElement("li");
     const button = document.createElement("button");
     button.type = "button";
-    const dirLabel = edge.direction === "outgoing" ? "->" : "<-";
-    button.textContent = `${dirLabel} ${edge.relationType} ${edge.other.name} (${edge.other.category})`;
+    const direction = edge.direction === "outgoing" ? "->" : "<-";
+    button.textContent = `${direction} ${edge.relationType} ${edge.other.name} (${edge.other.category})`;
     button.addEventListener("click", () => {
       state.selectedId = edge.other.id;
       renderEntityList();
@@ -245,144 +238,110 @@ function renderRelationLinks(entity) {
 }
 
 function renderRelationGraph(entity) {
-  const edges = buildEdges(entity);
-  const ranked = rankEdges(edges).filter((edge) => edge.weight >= state.threshold / 100);
-  const pruned = ranked.slice(0, 10);
   const width = relationGraph.clientWidth || 1000;
   const height = relationGraph.clientHeight || 510;
-
   relationGraph.setAttribute("viewBox", `0 0 ${width} ${height}`);
   relationGraph.innerHTML = "";
 
-  if (pruned.length === 0) {
-    appendSvgText(relationGraph, width / 2, height / 2, "No transitions above current threshold", "#657489", 16);
+  if (!entity) {
     return;
   }
 
-  const boxWidth = 200;
-  const boxHeight = 64;
-  const marginX = 46;
-  const marginY = 42;
+  const edges = dedupeGraphEdges(buildEdges(entity)).slice(0, state.maxLinkedNodes);
+  if (edges.length === 0) {
+    appendSvgText(relationGraph, width / 2, height / 2, "No linked entities for current selection", "#657489", 16);
+    return;
+  }
 
-  const selectedNode = {
-    id: entity.id,
-    x: width * 0.5,
-    y: height * 0.5,
-    kind: "selected",
-    entity
-  };
+  function dedupeGraphEdges(edges) {
+    const byOther = new Map();
+    edges.forEach((edge) => {
+      const key = edge.other.id;
+      const existing = byOther.get(key);
+      if (!existing) {
+        byOther.set(key, edge);
+        return;
+      }
+      if (existing.direction !== "outgoing" && edge.direction === "outgoing") {
+        byOther.set(key, edge);
+      }
+    });
+    return Array.from(byOther.values()).sort((a, b) => a.other.name.localeCompare(b.other.name));
+  }
 
-  const outgoing = pruned.filter((edge) => edge.direction === "outgoing");
-  const incoming = pruned.filter((edge) => edge.direction === "incoming");
+  const center = { x: width / 2, y: height / 2 };
+  const radius = Math.min(width, height) * 0.33;
 
-  const outgoingNodes = distributeFlowNodes(outgoing, "outgoing", width, height, marginX, marginY, boxWidth, boxHeight);
-  const incomingNodes = distributeFlowNodes(incoming, "incoming", width, height, marginX, marginY, boxWidth, boxHeight);
-  const nodes = dedupeNodes([selectedNode, ...incomingNodes, ...outgoingNodes]);
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-
-  pruned.forEach((edge) => {
-    const sourceNode = edge.direction === "outgoing" ? nodeById.get(entity.id) : nodeById.get(edge.other.id);
-    const targetNode = edge.direction === "outgoing" ? nodeById.get(edge.other.id) : nodeById.get(entity.id);
-    if (sourceNode && targetNode) {
-      appendCurvedEdge(relationGraph, sourceNode, targetNode, edge);
-    }
-  });
-
-  nodes.forEach((node) => appendRectNode(relationGraph, node, boxWidth, boxHeight));
-}
-
-function distributeFlowNodes(edges, kind, width, height, marginX, marginY, boxWidth, boxHeight) {
-  return edges.map((edge, index) => {
-    const rows = Math.ceil(edges.length / 2);
-    const row = index % rows;
-    const col = Math.floor(index / rows);
-    const laneX = kind === "outgoing"
-      ? width * (0.7 + col * 0.2)
-      : width * (0.18 - col * 0.14);
-    const laneY = marginY + row * ((height - marginY * 2) / Math.max(1, rows - 1));
-
+  const nodes = edges.map((edge, index) => {
+    const angle = (index / edges.length) * Math.PI * 2 - Math.PI / 2;
     return {
       id: edge.other.id,
-      x: clamp(laneX, marginX + boxWidth / 2, width - marginX - boxWidth / 2),
-      y: clamp(laneY, marginY + boxHeight / 2, height - marginY - boxHeight / 2),
-      kind,
-      entity: edge.other
+      entity: edge.other,
+      x: center.x + Math.cos(angle) * radius,
+      y: center.y + Math.sin(angle) * radius,
+      relationType: edge.relationType,
+      direction: edge.direction
     };
   });
-}
 
-function appendCurvedEdge(svg, sourceNode, targetNode, edge) {
-  const sourceX = sourceNode.x;
-  const sourceY = sourceNode.y;
-  const targetX = targetNode.x;
-  const targetY = targetNode.y;
-  const controlX = (sourceX + targetX) / 2;
-  const controlY = sourceY < targetY ? sourceY + 40 : sourceY - 40;
-  const color = edge.direction === "outgoing" ? "#0e7a43" : "#7a8797";
+  nodes.forEach((node) => {
+    appendLink(relationGraph, center, node, node.direction);
+    appendSvgText(
+      relationGraph,
+      (center.x + node.x) / 2,
+      (center.y + node.y) / 2 - 8,
+      node.relationType,
+      "#5d6f86",
+      11
+    );
+  });
 
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", `M ${sourceX} ${sourceY} Q ${controlX} ${controlY} ${targetX} ${targetY}`);
-  path.setAttribute("fill", "none");
-  path.setAttribute("stroke", color);
-  path.setAttribute("stroke-width", String(1.4 + edge.weight * 2.2));
-  path.setAttribute("stroke-dasharray", "4 5");
-  path.setAttribute("opacity", "0.82");
-  svg.appendChild(path);
-
-  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  label.setAttribute("x", String((sourceX + targetX) / 2));
-  label.setAttribute("y", String((sourceY + targetY) / 2 - 6));
-  label.setAttribute("text-anchor", "middle");
-  label.setAttribute("fill", "#4b5b6f");
-  label.setAttribute("font-size", "11");
-  label.textContent = `${Math.round(edge.weight * 100)}%`;
-  svg.appendChild(label);
-}
-
-function appendRectNode(svg, node, width, height) {
-  const nodeGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  nodeGroup.style.cursor = "pointer";
-  nodeGroup.setAttribute("role", "button");
-  nodeGroup.setAttribute("tabindex", "0");
-  nodeGroup.setAttribute("aria-label", `${node.entity.name} (${node.entity.category})`);
-
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  rect.setAttribute("x", String(node.x - width / 2));
-  rect.setAttribute("y", String(node.y - height / 2));
-  rect.setAttribute("width", String(width));
-  rect.setAttribute("height", String(height));
-  rect.setAttribute("rx", "8");
-  rect.setAttribute("fill", "#ffffff");
-  rect.setAttribute("stroke", "#b8c1cc");
-  rect.setAttribute("stroke-width", "1.5");
-  nodeGroup.appendChild(rect);
-
-  const accent = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  accent.setAttribute("x", String(node.x - width / 2));
-  accent.setAttribute("y", String(node.y - height / 2));
-  accent.setAttribute("width", String(width));
-  accent.setAttribute("height", "8");
-  accent.setAttribute("rx", "8");
-  accent.setAttribute("fill", node.kind === "selected" ? "#b22e2e" : node.kind === "outgoing" ? "#0e7a43" : "#576981");
-  nodeGroup.appendChild(accent);
-
-  appendSvgText(nodeGroup, node.x - width / 2 + 10, node.y - 10, shorten(node.entity.name, 24), "#182131", 12, "start", true);
-  appendSvgText(
-    nodeGroup,
-    node.x - width / 2 + 10,
-    node.y + 10,
-    `${node.entity.category} | ${(node.entity.relations ?? []).length} transitions`,
-    "#4d5d72",
-    11,
-    "start"
+  nodes.forEach((node) => appendNodeCircle(relationGraph, node, 34, false));
+  appendNodeCircle(
+    relationGraph,
+    { id: entity.id, entity, x: center.x, y: center.y, direction: "selected" },
+    42,
+    true
   );
+}
 
-  nodeGroup.addEventListener("click", () => {
+function appendLink(svg, source, targetNode, direction) {
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  line.setAttribute("x1", String(source.x));
+  line.setAttribute("y1", String(source.y));
+  line.setAttribute("x2", String(targetNode.x));
+  line.setAttribute("y2", String(targetNode.y));
+  line.setAttribute("stroke", direction === "outgoing" ? "#2f5ea7" : "#7b8898");
+  line.setAttribute("stroke-width", "2.1");
+  line.setAttribute("opacity", "0.8");
+  svg.appendChild(line);
+}
+
+function appendNodeCircle(svg, node, radius, selected) {
+  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  group.style.cursor = "pointer";
+  group.setAttribute("role", "button");
+  group.setAttribute("tabindex", "0");
+  group.setAttribute("aria-label", `${node.entity.name} (${node.entity.category})`);
+
+  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  circle.setAttribute("cx", String(node.x));
+  circle.setAttribute("cy", String(node.y));
+  circle.setAttribute("r", String(radius));
+  circle.setAttribute("fill", selected ? "#1f5ec6" : "#f5f8ff");
+  circle.setAttribute("stroke", selected ? "#1a3f84" : "#90a8ce");
+  circle.setAttribute("stroke-width", selected ? "3" : "2");
+  group.appendChild(circle);
+
+  appendSvgText(group, node.x, node.y - 3, shorten(node.entity.name, 20), selected ? "#ffffff" : "#20344f", 11, true);
+  appendSvgText(group, node.x, node.y + 13, node.entity.category, selected ? "#dce9ff" : "#4d6180", 10, false);
+
+  group.addEventListener("click", () => {
     state.selectedId = node.entity.id;
     renderEntityList();
     renderSelection();
   });
-  nodeGroup.addEventListener("keydown", (event) => {
+  group.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       state.selectedId = node.entity.id;
@@ -391,71 +350,39 @@ function appendRectNode(svg, node, width, height) {
     }
   });
 
-  svg.appendChild(nodeGroup);
+  svg.appendChild(group);
 }
 
-function appendSvgText(target, x, y, textContent, color, size, anchor = "middle", strong = false) {
-  const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  text.setAttribute("x", String(x));
-  text.setAttribute("y", String(y));
-  text.setAttribute("text-anchor", anchor);
-  text.setAttribute("fill", color);
-  text.setAttribute("font-size", String(size));
-  if (strong) {
-    text.setAttribute("font-weight", "700");
+function appendSvgText(target, x, y, text, color, fontSize, bold = false) {
+  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  label.setAttribute("x", String(x));
+  label.setAttribute("y", String(y));
+  label.setAttribute("text-anchor", "middle");
+  label.setAttribute("fill", color);
+  label.setAttribute("font-size", String(fontSize));
+  if (bold) {
+    label.setAttribute("font-weight", "700");
   }
-  text.textContent = textContent;
-  target.appendChild(text);
+  label.textContent = text;
+  target.appendChild(label);
 }
 
 function buildEdges(entity) {
   const outgoing = (entity.relations ?? []).map((relation) => ({
     direction: "outgoing",
     relationType: relation.type,
-    source: entity.id,
-    target: relation.target,
     other: entityById.get(relation.target)
   }));
 
   const incoming = (incomingRelations.get(entity.id) ?? []).map((relation) => ({
     direction: "incoming",
     relationType: relation.type,
-    source: relation.source,
-    target: entity.id,
     other: entityById.get(relation.source)
   }));
 
-  return [...outgoing, ...incoming].filter((edge) => edge.other);
-}
-
-function rankEdges(edges) {
-  const max = Math.max(edges.length, 1);
-  return edges
-    .map((edge) => {
-      const hash = hashString(`${edge.source}:${edge.relationType}:${edge.target}`);
-      const score = 0.12 + ((hash % 89) / 100);
-      return { ...edge, weight: Math.min(1, score) };
-    })
-    .sort((a, b) => b.weight - a.weight)
-    .slice(0, max);
-}
-
-function dedupeNodes(nodes) {
-  const byId = new Map();
-  nodes.forEach((node) => {
-    if (!byId.has(node.id)) {
-      byId.set(node.id, node);
-    }
-
-    function clamp(value, min, max) {
-      return Math.max(min, Math.min(max, value));
-    }
-
-    function shorten(value, max) {
-      return value.length <= max ? value : `${value.slice(0, max - 1)}...`;
-    }
-  });
-  return Array.from(byId.values());
+  return [...outgoing, ...incoming]
+    .filter((edge) => edge.other)
+    .sort((a, b) => a.other.name.localeCompare(b.other.name));
 }
 
 function buildIncomingRelations(entities) {
@@ -480,13 +407,8 @@ function toLabel(value) {
     .replace(/^./, (char) => char.toUpperCase());
 }
 
-function hashString(value) {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
+function shorten(value, maxLength) {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}...`;
 }
 
 function escapeHtml(value) {

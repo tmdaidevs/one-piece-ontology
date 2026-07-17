@@ -10,12 +10,12 @@
 <body>
   <header class="app-header">
     <div>
-      <p class="kicker">PROCESS MINING | One Piece Ontology</p>
-      <h1>Welcome back <span aria-hidden="true">👋</span></h1>
+      <p class="kicker">ONE PIECE ONTOLOGY</p>
+      <h1>Ontology Explorer</h1>
     </div>
     <section class="alert-tile" aria-label="Dashboard summary">
-      <p><span id="alerts-assigned">0</span> Alerts assigned to you</p>
-      <strong><span id="alerts-open">0</span> Open</strong>
+      <p><span id="alerts-assigned">0</span> Entities</p>
+      <strong><span id="alerts-open">0</span> Relations</strong>
     </section>
   </header>
 
@@ -47,23 +47,23 @@
     <section class="explorer card">
       <header class="explorer-header">
         <div>
-          <p class="kicker">DISCOVER</p>
-          <h2>Process Explorer</h2>
+          <p class="kicker">KNOWLEDGE GRAPH</p>
+          <h2>Ontology Graph</h2>
           <nav class="tabs" aria-label="Explorer views">
-            <button class="tab active" type="button">Process Overview</button>
-            <button class="tab" type="button">Single View</button>
+            <button class="tab active" type="button">Network View</button>
+            <button class="tab" type="button">Relation List</button>
           </nav>
         </div>
-        <button class="ghost-btn" type="button">Change Expected Path</button>
+        <button class="ghost-btn" type="button">Focus Selected Entity</button>
       </header>
 
       <section class="explorer-canvas">
         <aside class="control-card">
-          <h3>Show Additional Transitions</h3>
-          <p class="muted">Based on highest: Number of transitions</p>
-          <label for="transition-threshold">Expected transitions -> Full graph</label>
-          <input id="transition-threshold" type="range" min="1" max="100" value="35">
-          <p class="threshold-note">>= <span id="threshold-value">35</span>%</p>
+          <h3>Graph Controls</h3>
+          <p class="muted">Tune how many linked ontology entities are shown around the selected node.</p>
+          <label for="transition-threshold">Visible linked entities</label>
+          <input id="transition-threshold" type="range" min="3" max="14" value="10">
+          <p class="threshold-note"><span id="threshold-value">10</span> nodes</p>
         </aside>
 
         <div class="graph-wrap">
