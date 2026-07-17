@@ -3,7 +3,8 @@ import { CATEGORIES, ontologyEntities } from "./data.js";
 const state = {
   search: "",
   activeCategories: new Set(CATEGORIES),
-  selectedId: ontologyEntities[0]?.id ?? null
+  selectedId: ontologyEntities[0]?.id ?? null,
+  threshold: 35
 };
 
 const entityById = new Map(ontologyEntities.map((entity) => [entity.id, entity]));
@@ -16,7 +17,14 @@ const entityList = document.getElementById("entity-list");
 const entityDetails = document.getElementById("entity-details");
 const relationLinks = document.getElementById("relation-links");
 const relationGraph = document.getElementById("relation-graph");
+const graphNodes = document.getElementById("graph-nodes");
+const timelineBars = document.getElementById("timeline-bars");
+const thresholdInput = document.getElementById("transition-threshold");
+const thresholdValue = document.getElementById("threshold-value");
+const alertsAssigned = document.getElementById("alerts-assigned");
+const alertsOpen = document.getElementById("alerts-open");
 const entityItemTemplate = document.getElementById("entity-item-template");
+const graphNodeTemplate = document.getElementById("graph-node-template");
 
 bindEvents();
 render();
@@ -27,22 +35,61 @@ function bindEvents() {
     renderEntityList();
     renderSelection();
   });
+
+  thresholdInput.addEventListener("input", (event) => {
+    state.threshold = Number(event.target.value);
+    thresholdValue.textContent = String(state.threshold);
+    renderSelection();
+  });
 }
 
 function render() {
+  renderHeaderSummary();
+  renderTimelineBars();
   renderCategoryFilters();
   renderEntityList();
   renderSelection();
 }
 
+function renderHeaderSummary() {
+  const totalEntities = ontologyEntities.length;
+  const totalRelations = ontologyEntities.reduce((sum, entity) => sum + (entity.relations?.length ?? 0), 0);
+  alertsAssigned.textContent = String(totalEntities * 7 + 14);
+  alertsOpen.textContent = String(totalRelations + totalEntities);
+}
+
+function renderTimelineBars() {
+  timelineBars.innerHTML = "";
+  const values = buildTimelineSeries();
+  values.forEach((value) => {
+    const bar = document.createElement("div");
+    bar.className = "timeline-bar";
+    bar.style.height = `${Math.max(value, 8)}%`;
+    timelineBars.appendChild(bar);
+  });
+}
+
+function buildTimelineSeries() {
+  const buckets = new Array(20).fill(0);
+  ontologyEntities.forEach((entity, index) => {
+    const bucket = index % buckets.length;
+    buckets[bucket] += (entity.relations?.length ?? 1) + entity.tags.length;
+  });
+
+  const max = Math.max(...buckets, 1);
+  return buckets.map((value) => (value / max) * 100);
+}
+
 function renderCategoryFilters() {
+  const counts = countByCategory(getSearchMatchedEntities());
   categoryFilters.innerHTML = "";
+
   CATEGORIES.forEach((category) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `filter-chip${state.activeCategories.has(category) ? " active" : ""}`;
-    button.textContent = category;
-    button.setAttribute("aria-pressed", state.activeCategories.has(category));
+    button.setAttribute("aria-pressed", String(state.activeCategories.has(category)));
+    button.innerHTML = `<span>${escapeHtml(category)}</span><span class="chip-count">${counts.get(category) ?? 0}</span>`;
     button.addEventListener("click", () => {
       if (state.activeCategories.has(category)) {
         state.activeCategories.delete(category);
@@ -62,12 +109,16 @@ function renderCategoryFilters() {
   });
 }
 
-function getFilteredEntities() {
-  return ontologyEntities.filter((entity) => {
-    if (!state.activeCategories.has(entity.category)) {
-      return false;
-    }
+function countByCategory(entities) {
+  const counts = new Map(CATEGORIES.map((category) => [category, 0]));
+  entities.forEach((entity) => {
+    counts.set(entity.category, (counts.get(entity.category) ?? 0) + 1);
+  });
+  return counts;
+}
 
+function getSearchMatchedEntities() {
+  return ontologyEntities.filter((entity) => {
     if (!state.search) {
       return true;
     }
@@ -82,6 +133,10 @@ function getFilteredEntities() {
       .toLowerCase();
     return haystack.includes(state.search);
   });
+}
+
+function getFilteredEntities() {
+  return getSearchMatchedEntities().filter((entity) => state.activeCategories.has(entity.category));
 }
 
 function renderEntityList() {
@@ -109,13 +164,14 @@ function renderEntityList() {
       const button = fragment.querySelector(".entity-item");
       const name = fragment.querySelector(".entity-name");
       const category = fragment.querySelector(".entity-category");
-      button.dataset.id = entity.id;
+
       button.classList.toggle("active", entity.id === state.selectedId);
       button.addEventListener("click", () => {
         state.selectedId = entity.id;
-        renderSelection();
         renderEntityList();
+        renderSelection();
       });
+
       name.textContent = entity.name;
       category.textContent = entity.category;
       entityList.appendChild(fragment);
@@ -127,12 +183,13 @@ function renderSelection() {
 
   if (!entity) {
     entityDetails.innerHTML = `
-      <h2>Select an entity</h2>
+      <h3>Select an entity</h3>
       <p class="muted">Choose an item from the list to inspect details and relationships.</p>
     `;
     relationLinks.innerHTML = "No entity selected.";
     relationLinks.classList.add("muted");
     relationGraph.innerHTML = "";
+    graphNodes.innerHTML = "";
     return;
   }
 
@@ -150,7 +207,7 @@ function renderDetails(entity) {
 
   entityDetails.innerHTML = `
     <div class="details-header">
-      <h2>${escapeHtml(entity.name)}</h2>
+      <h3>${escapeHtml(entity.name)}</h3>
       <span class="category-badge">${escapeHtml(entity.category)}</span>
     </div>
     <p>${escapeHtml(entity.summary)}</p>
@@ -160,21 +217,8 @@ function renderDetails(entity) {
 }
 
 function renderRelationLinks(entity) {
-  const outgoing = (entity.relations ?? []).map((relation) => ({
-    direction: "outgoing",
-    relationType: relation.type,
-    source: entity.id,
-    target: relation.target
-  }));
-  const incoming = (incomingRelations.get(entity.id) ?? []).map((relation) => ({
-    direction: "incoming",
-    relationType: relation.type,
-    source: relation.source,
-    target: entity.id
-  }));
-  const combined = [...outgoing, ...incoming];
-
-  if (combined.length === 0) {
+  const edges = buildEdges(entity);
+  if (edges.length === 0) {
     relationLinks.classList.add("muted");
     relationLinks.innerHTML = "No linked relations for this entity.";
     return;
@@ -184,20 +228,14 @@ function renderRelationLinks(entity) {
   const list = document.createElement("ul");
   list.className = "relation-list";
 
-  combined.forEach((edge) => {
-    const otherId = edge.direction === "outgoing" ? edge.target : edge.source;
-    const other = entityById.get(otherId);
-    if (!other) {
-      return;
-    }
-
+  edges.forEach((edge) => {
     const li = document.createElement("li");
     const button = document.createElement("button");
     button.type = "button";
     const dirLabel = edge.direction === "outgoing" ? "->" : "<-";
-    button.textContent = `${dirLabel} ${edge.relationType} ${other.name} (${other.category})`;
+    button.textContent = `${dirLabel} ${edge.relationType} ${edge.other.name} (${edge.other.category})`;
     button.addEventListener("click", () => {
-      state.selectedId = other.id;
+      state.selectedId = edge.other.id;
       renderEntityList();
       renderSelection();
     });
@@ -210,106 +248,142 @@ function renderRelationLinks(entity) {
 }
 
 function renderRelationGraph(entity) {
-  const width = relationGraph.clientWidth || 800;
-  const height = relationGraph.clientHeight || 420;
+  const edges = buildEdges(entity);
+  const ranked = rankEdges(edges).filter((edge) => edge.weight >= state.threshold / 100);
+  const pruned = ranked.slice(0, 14);
+  const width = relationGraph.clientWidth || 1000;
+  const height = relationGraph.clientHeight || 510;
+
   relationGraph.setAttribute("viewBox", `0 0 ${width} ${height}`);
   relationGraph.innerHTML = "";
+  graphNodes.innerHTML = "";
 
-  const center = { x: width / 2, y: height / 2 };
-  const radius = Math.min(width, height) * 0.33;
+  const selectedNode = { id: entity.id, x: width * 0.34, y: height * 0.45, kind: "selected", entity };
 
-  const linkedMap = new Map();
+  const outgoing = pruned.filter((edge) => edge.direction === "outgoing");
+  const incoming = pruned.filter((edge) => edge.direction === "incoming");
 
-  for (const relation of entity.relations ?? []) {
-    const target = entityById.get(relation.target);
-    if (!target || target.id === entity.id) {
-      continue;
+  const outgoingNodes = outgoing.map((edge, index) => ({
+    id: edge.other.id,
+    x: width * (0.62 + (index % 3) * 0.15),
+    y: height * (0.18 + (Math.floor(index / 3) * 0.2)),
+    kind: "outgoing",
+    entity: edge.other
+  }));
+
+  const incomingNodes = incoming.map((edge, index) => ({
+    id: edge.other.id,
+    x: width * 0.12,
+    y: height * (0.22 + index * 0.2),
+    kind: "incoming",
+    entity: edge.other
+  }));
+
+  const dedupedNodes = dedupeNodes([selectedNode, ...incomingNodes, ...outgoingNodes]);
+  const nodeById = new Map(dedupedNodes.map((node) => [node.id, node]));
+
+  pruned.forEach((edge) => {
+    const sourceNode = edge.direction === "outgoing" ? nodeById.get(entity.id) : nodeById.get(edge.other.id);
+    const targetNode = edge.direction === "outgoing" ? nodeById.get(edge.other.id) : nodeById.get(entity.id);
+    if (!sourceNode || !targetNode) {
+      return;
     }
-    linkedMap.set(target.id, { id: target.id, name: target.name, category: target.category, type: relation.type });
-  }
 
-  for (const incoming of incomingRelations.get(entity.id) ?? []) {
-    const source = entityById.get(incoming.source);
-    if (!source || source.id === entity.id) {
-      continue;
-    }
-    if (!linkedMap.has(source.id)) {
-      linkedMap.set(source.id, { id: source.id, name: source.name, category: source.category, type: incoming.type });
-    }
-  }
-
-  const linked = Array.from(linkedMap.values()).slice(0, 12);
-
-  if (linked.length === 0) {
-    return;
-  }
-
-  linked.forEach((node, index) => {
-    const angle = (index / linked.length) * Math.PI * 2;
-    const point = {
-      x: center.x + Math.cos(angle) * radius,
-      y: center.y + Math.sin(angle) * radius
-    };
-
-    appendLine(relationGraph, center.x, center.y, point.x, point.y);
-    appendCircleNode(relationGraph, point.x, point.y, 30, node.name, node.category, () => {
-      state.selectedId = node.id;
-      renderEntityList();
-      renderSelection();
-    });
-    appendText(relationGraph, point.x, point.y + 46, shortName(node.name));
+    appendCurvedEdge(relationGraph, sourceNode, targetNode, edge);
   });
 
-  appendCircleNode(relationGraph, center.x, center.y, 40, entity.name, entity.category, null, true);
-  appendText(relationGraph, center.x, center.y + 57, shortName(entity.name));
+  dedupedNodes.forEach((node) => appendGraphNode(node));
 }
 
-function appendLine(svg, x1, y1, x2, y2) {
-  const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  line.setAttribute("x1", x1);
-  line.setAttribute("y1", y1);
-  line.setAttribute("x2", x2);
-  line.setAttribute("y2", y2);
-  line.setAttribute("stroke", "#3f5a88");
-  line.setAttribute("stroke-width", "2");
-  svg.appendChild(line);
+function appendGraphNode(node) {
+  const fragment = graphNodeTemplate.content.cloneNode(true);
+  const button = fragment.querySelector(".graph-node");
+  const title = fragment.querySelector(".graph-node-title");
+  const meta = fragment.querySelector(".graph-node-meta");
+
+  button.classList.add(node.kind);
+  button.style.left = `${node.x}px`;
+  button.style.top = `${node.y}px`;
+  title.textContent = node.entity.name;
+  meta.textContent = `${node.entity.category} | ${node.entity.relations?.length ?? 0} transitions`;
+  button.setAttribute("aria-label", `${node.entity.name} (${node.entity.category})`);
+  button.addEventListener("click", () => {
+    state.selectedId = node.entity.id;
+    renderEntityList();
+    renderSelection();
+  });
+
+  graphNodes.appendChild(fragment);
 }
 
-function appendCircleNode(svg, x, y, r, name, category, onClick, isCenter = false) {
-  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  circle.setAttribute("cx", x);
-  circle.setAttribute("cy", y);
-  circle.setAttribute("r", r);
-  circle.setAttribute("fill", isCenter ? "#2f6cc2" : "#22406f");
-  circle.setAttribute("stroke", isCenter ? "#9fcbff" : "#72a9ff");
-  circle.setAttribute("stroke-width", isCenter ? "3" : "2");
-  circle.setAttribute("role", "button");
-  circle.setAttribute("tabindex", onClick ? "0" : "-1");
-  circle.setAttribute("aria-label", `${name} (${category})`);
+function appendCurvedEdge(svg, sourceNode, targetNode, edge) {
+  const sourceX = sourceNode.x + (sourceNode.kind === "incoming" ? 80 : 110);
+  const sourceY = sourceNode.y;
+  const targetX = targetNode.x - (targetNode.kind === "incoming" ? 120 : 80);
+  const targetY = targetNode.y;
+  const controlX = (sourceX + targetX) / 2;
+  const controlY = sourceY < targetY ? sourceY - 35 : sourceY + 35;
+  const color = edge.direction === "outgoing" ? "#0e7a43" : "#7a8797";
 
-  if (onClick) {
-    circle.style.cursor = "pointer";
-    circle.addEventListener("click", onClick);
-    circle.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        onClick();
-      }
-    });
-  }
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", `M ${sourceX} ${sourceY} Q ${controlX} ${controlY} ${targetX} ${targetY}`);
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", color);
+  path.setAttribute("stroke-width", String(1.4 + edge.weight * 2.2));
+  path.setAttribute("stroke-dasharray", "4 5");
+  path.setAttribute("opacity", "0.82");
+  svg.appendChild(path);
 
-  svg.appendChild(circle);
+  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  label.setAttribute("x", String((sourceX + targetX) / 2));
+  label.setAttribute("y", String((sourceY + targetY) / 2 - 6));
+  label.setAttribute("text-anchor", "middle");
+  label.setAttribute("fill", "#4b5b6f");
+  label.setAttribute("font-size", "11");
+  label.textContent = `${Math.round(edge.weight * 100)}%`;
+  svg.appendChild(label);
 }
 
-function appendText(svg, x, y, label) {
-  const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  text.setAttribute("x", x);
-  text.setAttribute("y", y);
-  text.setAttribute("text-anchor", "middle");
-  text.setAttribute("fill", "#d7e8ff");
-  text.setAttribute("font-size", "12");
-  text.textContent = label;
-  svg.appendChild(text);
+function buildEdges(entity) {
+  const outgoing = (entity.relations ?? []).map((relation) => ({
+    direction: "outgoing",
+    relationType: relation.type,
+    source: entity.id,
+    target: relation.target,
+    other: entityById.get(relation.target)
+  }));
+
+  const incoming = (incomingRelations.get(entity.id) ?? []).map((relation) => ({
+    direction: "incoming",
+    relationType: relation.type,
+    source: relation.source,
+    target: entity.id,
+    other: entityById.get(relation.source)
+  }));
+
+  return [...outgoing, ...incoming].filter((edge) => edge.other);
+}
+
+function rankEdges(edges) {
+  const max = Math.max(edges.length, 1);
+  return edges
+    .map((edge) => {
+      const hash = hashString(`${edge.source}:${edge.relationType}:${edge.target}`);
+      const score = 0.12 + ((hash % 89) / 100);
+      return { ...edge, weight: Math.min(1, score) };
+    })
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, max);
+}
+
+function dedupeNodes(nodes) {
+  const byId = new Map();
+  nodes.forEach((node) => {
+    if (!byId.has(node.id)) {
+      byId.set(node.id, node);
+    }
+  });
+  return Array.from(byId.values());
 }
 
 function buildIncomingRelations(entities) {
@@ -325,10 +399,6 @@ function buildIncomingRelations(entities) {
   return index;
 }
 
-function shortName(name) {
-  return name.length > 20 ? `${name.slice(0, 19)}...` : name;
-}
-
 function toLabel(value) {
   return value
     .replace(/([A-Z])/g, " $1")
@@ -336,6 +406,15 @@ function toLabel(value) {
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^./, (char) => char.toUpperCase());
+}
+
+function hashString(value) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
 }
 
 function escapeHtml(value) {

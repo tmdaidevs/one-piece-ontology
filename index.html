@@ -8,38 +8,79 @@
   <link rel="stylesheet" href="./assets/css/styles.css">
 </head>
 <body>
-  <header class="topbar">
-    <h1>One Piece Ontology Explorer</h1>
-    <p class="subtitle">Static ontology app for characters, crews, islands, organizations, devil fruits, and events.</p>
+  <header class="app-header">
+    <div>
+      <p class="kicker">PROCESS MINING | One Piece Ontology</p>
+      <h1>Welcome back <span aria-hidden="true">👋</span></h1>
+    </div>
+    <section class="alert-tile" aria-label="Dashboard summary">
+      <p><span id="alerts-assigned">0</span> Alerts assigned to you</p>
+      <strong><span id="alerts-open">0</span> Open</strong>
+    </section>
   </header>
 
-  <main class="layout">
-    <aside class="sidebar card">
-      <label class="field-label" for="search-input">Search entities</label>
-      <input id="search-input" class="search-input" type="search" placeholder="Search by name, summary, or tag">
+  <main class="dashboard">
+    <aside class="filters-panel card">
+      <h2>Filters</h2>
+      <section class="panel-block">
+        <p class="block-title">Reported date</p>
+        <div id="timeline-bars" class="timeline-bars" aria-hidden="true"></div>
+      </section>
 
-      <fieldset class="filters">
-        <legend>Categories</legend>
+      <section class="panel-block">
+        <label class="field-label" for="search-input">Search entities</label>
+        <input id="search-input" class="search-input" type="search" placeholder="Search by name, summary, or tag">
+      </section>
+
+      <section class="panel-block">
+        <p class="block-title">Type</p>
         <div id="category-filters" class="filter-grid"></div>
-      </fieldset>
+      </section>
 
-      <section class="entity-list-wrap">
-        <h2>Entities</h2>
+      <section class="panel-block entity-list-wrap">
+        <h3>Entities</h3>
         <p id="result-count" class="muted">0 results</p>
         <ul id="entity-list" class="entity-list" aria-live="polite"></ul>
       </section>
     </aside>
 
-    <section class="details card">
-      <article id="entity-details" class="details-panel">
-        <h2>Select an entity</h2>
-        <p class="muted">Choose an item from the list to inspect details and relationships.</p>
-      </article>
+    <section class="explorer card">
+      <header class="explorer-header">
+        <div>
+          <p class="kicker">DISCOVER</p>
+          <h2>Process Explorer</h2>
+          <nav class="tabs" aria-label="Explorer views">
+            <button class="tab active" type="button">Process Overview</button>
+            <button class="tab" type="button">Single View</button>
+          </nav>
+        </div>
+        <button class="ghost-btn" type="button">Change Expected Path</button>
+      </header>
 
-      <section class="relations-section">
-        <h3>Relationship Explorer</h3>
-        <div id="relation-links" class="relation-links muted">No entity selected.</div>
-        <svg id="relation-graph" class="relation-graph" role="img" aria-label="Relationship graph"></svg>
+      <section class="explorer-canvas">
+        <aside class="control-card">
+          <h3>Show Additional Transitions</h3>
+          <p class="muted">Based on highest: Number of transitions</p>
+          <label for="transition-threshold">Expected transitions -> Full graph</label>
+          <input id="transition-threshold" type="range" min="1" max="100" value="35">
+          <p class="threshold-note">>= <span id="threshold-value">35</span>%</p>
+        </aside>
+
+        <div class="graph-wrap">
+          <svg id="relation-graph" class="relation-graph" role="img" aria-label="Relationship graph"></svg>
+          <div id="graph-nodes" class="graph-nodes"></div>
+        </div>
+      </section>
+
+      <section class="inspector">
+        <article id="entity-details" class="details-panel">
+          <h3>Select an entity</h3>
+          <p class="muted">Choose an item from the list to inspect details and relationships.</p>
+        </article>
+        <section class="relations-section">
+          <h3>Linked Relations</h3>
+          <div id="relation-links" class="relation-links muted">No entity selected.</div>
+        </section>
       </section>
     </section>
   </main>
@@ -51,6 +92,13 @@
         <span class="entity-category"></span>
       </button>
     </li>
+  </template>
+
+  <template id="graph-node-template">
+    <button class="graph-node" type="button">
+      <span class="graph-node-title"></span>
+      <span class="graph-node-meta"></span>
+    </button>
   </template>
 
   <script type="module" src="./assets/js/app.js"></script>
