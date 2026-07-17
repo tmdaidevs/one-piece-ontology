@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>One Piece Ontology Explorer</title>
+  <meta name="description" content="A static One Piece ontology explorer with search, category filters, and relationship browsing.">
+  <link rel="stylesheet" href="./assets/css/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>One Piece Ontology Explorer</h1>
+    <p class="subtitle">Static ontology app for characters, crews, islands, organizations, devil fruits, and events.</p>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar card">
+      <label class="field-label" for="search-input">Search entities</label>
+      <input id="search-input" class="search-input" type="search" placeholder="Search by name, summary, or tag">
+
+      <fieldset class="filters">
+        <legend>Categories</legend>
+        <div id="category-filters" class="filter-grid"></div>
+      </fieldset>
+
+      <section class="entity-list-wrap">
+        <h2>Entities</h2>
+        <p id="result-count" class="muted">0 results</p>
+        <ul id="entity-list" class="entity-list" aria-live="polite"></ul>
+      </section>
+    </aside>
+
+    <section class="details card">
+      <article id="entity-details" class="details-panel">
+        <h2>Select an entity</h2>
+        <p class="muted">Choose an item from the list to inspect details and relationships.</p>
+      </article>
+
+      <section class="relations-section">
+        <h3>Relationship Explorer</h3>
+        <div id="relation-links" class="relation-links muted">No entity selected.</div>
+        <svg id="relation-graph" class="relation-graph" role="img" aria-label="Relationship graph"></svg>
+      </section>
+    </section>
+  </main>
+
+  <template id="entity-item-template">
+    <li>
+      <button class="entity-item" type="button">
+        <span class="entity-name"></span>
+        <span class="entity-category"></span>
+      </button>
+    </li>
+  </template>
+
+  <script type="module" src="./assets/js/app.js"></script>
+</body>
+</html>
