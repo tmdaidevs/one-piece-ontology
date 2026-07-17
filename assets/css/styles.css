@@ -285,18 +285,19 @@ body {
 }
 
 .explorer-canvas {
-  position: relative;
+  display: grid;
+  grid-template-columns: minmax(280px, 320px) 1fr;
+  gap: 1rem;
+  align-items: start;
+  padding: 1rem;
   min-height: 510px;
 }
 
 .control-card {
-  position: absolute;
-  top: 1.4rem;
-  left: 1.4rem;
-  width: 320px;
+  position: static;
+  width: 100%;
   border: 1px solid var(--line-strong);
   background: #fff;
-  z-index: 2;
   box-shadow: var(--shadow);
   padding: 0.85rem 0.95rem;
 }
@@ -324,7 +325,7 @@ body {
 .graph-wrap {
   position: relative;
   width: 100%;
-  min-height: 510px;
+  min-height: 0;
 }
 
 .relation-graph {
@@ -439,6 +440,16 @@ body {
   }
 
   .explorer-canvas {
+    grid-template-columns: 1fr;
+    min-height: auto;
+    padding: 1rem;
+  }
+
+  .control-card {
+    width: 100%;
+  }
+
+  .graph-wrap {
     min-height: 620px;
   }
 
